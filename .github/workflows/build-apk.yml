@@ -1,0 +1,47 @@
+﻿name: Generar APK Android
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar proyecto
+        uses: actions/checkout@v4
+
+      - name: Instalar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar Flet y dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install "flet[all]==0.85.3"
+          pip install -r requirements.txt
+
+      - name: Generar APK
+        run: |
+          flet build apk . \
+            --permissions camera \
+            --product "Martín Oñate Technical Service" \
+            --project martin_onate_service \
+            --yes
+
+      - name: Buscar APK generado
+        run: |
+          find build -type f -name "*.apk" -print
+
+      - name: Guardar APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: martin-onate-android-apk
+          path: |
+            build/**/*.apk
+          if-no-files-found: error
+          retention-days: 30
