@@ -1,0 +1,5 @@
+flet==0.85.3
+reportlab
+pillow
+flet-camera
+flet-permission-handler
