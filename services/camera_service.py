@@ -175,10 +175,9 @@ class CameraService:
                 image_format_group=fc.ImageFormatGroup.JPEG,
             )
 
-            try:
-                await self.camera.lock_capture_orientation()
-            except Exception:
-                pass
+            # Se eliminó lock_capture_orientation()
+            # para permitir que Android guarde las fotos
+            # respetando la orientación real del dispositivo.
 
             self.inicializada = True
 
@@ -248,9 +247,8 @@ class CameraService:
             return foto_bytes
 
         finally:
-            # Android finaliza internamente la sesión después
-            # de tomar la fotografía. La dejamos marcada como
-            # cerrada para reinicializarla en la próxima captura.
+            # Android finaliza internamente la sesión
+            # después de tomar una fotografía.
             self.inicializada = False
             self.inicializando = False
             self.camara_seleccionada = None
