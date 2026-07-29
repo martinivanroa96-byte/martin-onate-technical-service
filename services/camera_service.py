@@ -34,8 +34,7 @@ class CameraService:
 
     def agregar_servicio_permisos(self):
         """
-        PermissionHandler es un servicio de Flet, por lo que
-        debe agregarse a page.services y no a page.overlay.
+        PermissionHandler debe registrarse como servicio.
         """
         if not self.es_android():
             return
@@ -55,12 +54,7 @@ class CameraService:
 
     def obtener_preview(self):
         """
-        Devuelve el control Camera para colocarlo dentro
-        de la ventana de vista previa.
-
-        Importante:
-        nuevo_servicio.py debe mostrar este control en la
-        página antes de llamar a inicializar().
+        Devuelve el control visual de la cámara.
         """
         return self.camera
 
@@ -81,10 +75,8 @@ class CameraService:
         try:
             self.agregar_servicio_permisos()
 
-            permiso = (
-                await self.permission_handler.request(
-                    fph.Permission.CAMERA
-                )
+            permiso = await self.permission_handler.request(
+                fph.Permission.CAMERA
             )
 
             if permiso == fph.PermissionStatus.GRANTED:
@@ -119,11 +111,8 @@ class CameraService:
 
     async def inicializar(self):
         """
-        Inicializa la cámara.
-
-        El control obtenido mediante obtener_preview()
-        debe estar visible y agregado a la página antes
-        de ejecutar este método.
+        Inicializa nuevamente la cámara cada vez que sea
+        necesario tomar una fotografía.
         """
         if not self.disponible_en_dispositivo():
             return (
@@ -156,9 +145,7 @@ class CameraService:
                     detalle,
                 )
 
-            camaras = (
-                await self.camera.get_available_cameras()
-            )
+            camaras = await self.camera.get_available_cameras()
 
             if not camaras:
                 return (
@@ -183,20 +170,14 @@ class CameraService:
 
             await self.camera.initialize(
                 description=self.camara_seleccionada,
-                resolution_preset=(
-                    fc.ResolutionPreset.MEDIUM
-                ),
+                resolution_preset=fc.ResolutionPreset.MEDIUM,
                 enable_audio=False,
-                image_format_group=(
-                    fc.ImageFormatGroup.JPEG
-                ),
+                image_format_group=fc.ImageFormatGroup.JPEG,
             )
 
             try:
                 await self.camera.lock_capture_orientation()
             except Exception:
-                # Algunos dispositivos no permiten bloquear
-                # la orientación. No impide tomar fotografías.
                 pass
 
             self.inicializada = True
@@ -208,6 +189,7 @@ class CameraService:
 
         except Exception as error:
             self.inicializada = False
+            self.camara_seleccionada = None
 
             return (
                 False,
@@ -255,18 +237,27 @@ class CameraService:
                 "La cámara todavía no está inicializada."
             )
 
-        foto_bytes = await self.camera.take_picture()
+        try:
+            foto_bytes = await self.camera.take_picture()
 
-        if not foto_bytes:
-            raise RuntimeError(
-                "La cámara no devolvió una fotografía."
-            )
+            if not foto_bytes:
+                raise RuntimeError(
+                    "La cámara no devolvió una fotografía."
+                )
 
-        return foto_bytes
+            return foto_bytes
+
+        finally:
+            # Android finaliza internamente la sesión después
+            # de tomar la fotografía. La dejamos marcada como
+            # cerrada para reinicializarla en la próxima captura.
+            self.inicializada = False
+            self.inicializando = False
+            self.camara_seleccionada = None
 
     async def cerrar(self):
         """
-        Libera la cámara cuando ya no se utilizará.
+        Libera la cámara al salir de la vista.
         """
         if self.camera is None:
             return

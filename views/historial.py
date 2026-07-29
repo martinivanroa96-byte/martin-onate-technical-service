@@ -1,5 +1,6 @@
 import os
 from datetime import datetime
+from pathlib import Path
 
 import flet as ft
 
@@ -17,9 +18,14 @@ COLOR_EDITAR = "#D98C00"
 COLOR_ELIMINAR = "#B3261E"
 COLOR_LINEA = "#2D6A8A"
 COLOR_TEXTO = "#B8C7D1"
+COLOR_EXITO = "#8FD694"
+COLOR_ERROR = "#FF8A80"
 
 
-def historial_view(page: ft.Page, cambiar_vista):
+def historial_view(
+    page: ft.Page,
+    cambiar_vista,
+):
     # =====================================================
     # TAMAÑOS RESPONSIVE
     # =====================================================
@@ -28,15 +34,23 @@ def historial_view(page: ft.Page, cambiar_vista):
     alto_pagina = page.height or 700
 
     ancho_contenido = min(
-        max(ancho_pagina - 30, 300),
+        max(
+            ancho_pagina - 30,
+            300,
+        ),
         950,
     )
 
-    # Espacio reservado para título, buscador, mensaje y márgenes.
     alto_lista = max(
         alto_pagina - 220,
         300,
     )
+
+    # =====================================================
+    # SERVICIOS
+    # =====================================================
+
+    share_service = ft.Share()
 
     # =====================================================
     # CONTROLES PRINCIPALES
@@ -54,9 +68,9 @@ def historial_view(page: ft.Page, cambiar_vista):
         "",
         color="#8EC5E8",
         size=12,
+        selectable=True,
     )
 
-    # La altura explícita es lo que asegura el scroll.
     lista = ft.ListView(
         height=alto_lista,
         spacing=15,
@@ -67,33 +81,111 @@ def historial_view(page: ft.Page, cambiar_vista):
     ordenes = []
 
     # =====================================================
-    # ABRIR PDF
+    # MENSAJES
     # =====================================================
 
-    def abrir_pdf(ruta):
+    def mostrar_mensaje(
+        texto,
+        color="#8EC5E8",
+    ):
+        mensaje.value = texto
+        mensaje.color = color
+        page.update()
+
+    def mostrar_snackbar(texto):
+        page.show_dialog(
+            ft.SnackBar(
+                content=ft.Text(texto),
+            )
+        )
+
+    # =====================================================
+    # PLATAFORMA
+    # =====================================================
+
+    def es_windows():
+        plataforma = str(
+            page.platform
+        ).lower()
+
+        return (
+            "windows" in plataforma
+            or os.name == "nt"
+        )
+
+    # =====================================================
+    # ABRIR O COMPARTIR PDF
+    # =====================================================
+
+    async def abrir_o_compartir_pdf(
+        ruta,
+    ):
         if not ruta:
-            mensaje.value = "La orden no tiene un PDF registrado."
-            page.update()
+            mostrar_mensaje(
+                "La orden no tiene un PDF registrado.",
+                COLOR_ERROR,
+            )
             return
 
-        if not os.path.exists(ruta):
-            mensaje.value = "No se encontró el archivo PDF."
-            page.update()
+        archivo_pdf = Path(ruta)
+
+        if not archivo_pdf.exists():
+            mostrar_mensaje(
+                (
+                    "No se encontró el archivo PDF. "
+                    "Puede haber sido eliminado."
+                ),
+                COLOR_ERROR,
+            )
             return
 
         try:
-            if os.name == "nt":
-                os.startfile(ruta)
-            else:
-                mensaje.value = (
-                    "La apertura del PDF en Android se configurará "
-                    "durante la prueba móvil."
+            if es_windows():
+                os.startfile(
+                    str(archivo_pdf)
                 )
-                page.update()
 
-        except OSError as error:
-            mensaje.value = f"No se pudo abrir el PDF: {error}"
-            page.update()
+                mostrar_mensaje(
+                    "PDF abierto correctamente.",
+                    COLOR_EXITO,
+                )
+
+                return
+
+            await share_service.share_files(
+                [
+                    ft.ShareFile.from_path(
+                        str(archivo_pdf),
+                        name=archivo_pdf.name,
+                    )
+                ],
+                title="Compartir informe técnico",
+                subject="Informe técnico de servicio",
+                text=(
+                    "Informe técnico generado por "
+                    "Martín Oñate Technical Service."
+                ),
+            )
+
+            mostrar_mensaje(
+                "Menú para compartir abierto.",
+                COLOR_EXITO,
+            )
+
+        except Exception as error:
+            mostrar_mensaje(
+                (
+                    "No se pudo abrir o compartir "
+                    f"el PDF: {error}"
+                ),
+                COLOR_ERROR,
+            )
+
+    def ejecutar_pdf(ruta):
+        page.run_task(
+            abrir_o_compartir_pdf,
+            ruta,
+        )
 
     # =====================================================
     # FECHA
@@ -106,7 +198,9 @@ def historial_view(page: ft.Page, cambiar_vista):
         try:
             return datetime.fromisoformat(
                 str(fecha)
-            ).strftime("%d-%m-%Y %H:%M")
+            ).strftime(
+                "%d-%m-%Y %H:%M"
+            )
 
         except ValueError:
             return str(fecha)
@@ -118,18 +212,23 @@ def historial_view(page: ft.Page, cambiar_vista):
     def cerrar_dialogo():
         page.pop_dialog()
 
-    def confirmar_eliminacion(codigo_orden):
+    def confirmar_eliminacion(
+        codigo_orden,
+    ):
         def eliminar_confirmado(e):
             correcto, detalle = eliminar_orden(
                 codigo_orden
             )
 
             cerrar_dialogo()
+
             mensaje.value = detalle
 
             if correcto:
+                mensaje.color = COLOR_EXITO
                 cargar_ordenes()
             else:
+                mensaje.color = COLOR_ERROR
                 page.update()
 
         dialogo = ft.AlertDialog(
@@ -140,14 +239,18 @@ def historial_view(page: ft.Page, cambiar_vista):
             ),
             content=ft.Text(
                 (
-                    f"¿Seguro que deseas eliminar {codigo_orden}?\n\n"
-                    "Se borrarán sus datos, PDF, fotografías y firmas."
+                    f"¿Seguro que deseas eliminar "
+                    f"{codigo_orden}?\n\n"
+                    "Se borrarán sus datos, PDF, "
+                    "fotografías y firmas."
                 )
             ),
             actions=[
                 ft.TextButton(
                     "Cancelar",
-                    on_click=lambda e: cerrar_dialogo(),
+                    on_click=lambda e: (
+                        cerrar_dialogo()
+                    ),
                 ),
                 ft.ElevatedButton(
                     "Eliminar",
@@ -156,10 +259,14 @@ def historial_view(page: ft.Page, cambiar_vista):
                     on_click=eliminar_confirmado,
                 ),
             ],
-            actions_alignment=ft.MainAxisAlignment.END,
+            actions_alignment=(
+                ft.MainAxisAlignment.END
+            ),
         )
 
-        page.show_dialog(dialogo)
+        page.show_dialog(
+            dialogo
+        )
 
     # =====================================================
     # TARJETA DE ORDEN
@@ -173,11 +280,17 @@ def historial_view(page: ft.Page, cambiar_vista):
         )
 
         codigo_orden = str(
-            orden.get("codigo_orden", "")
+            orden.get(
+                "codigo_orden",
+                "",
+            )
         )
 
         patente = str(
-            orden.get("patente", "")
+            orden.get(
+                "patente",
+                "",
+            )
         ).upper()
 
         ruta_pdf = orden.get(
@@ -188,8 +301,113 @@ def historial_view(page: ft.Page, cambiar_vista):
         fecha = formatear_fecha(
             orden.get(
                 "fecha_informe",
-                orden.get("fecha_guardado", ""),
+                orden.get(
+                    "fecha_guardado",
+                    "",
+                ),
             )
+        )
+
+        texto_boton_pdf = (
+            "Abrir PDF"
+            if es_windows()
+            else "Compartir PDF"
+        )
+
+        icono_boton_pdf = (
+            ft.Icons.PICTURE_AS_PDF
+            if es_windows()
+            else ft.Icons.SHARE
+        )
+
+        boton_detalle = ft.ElevatedButton(
+            "Ver detalle",
+            icon=ft.Icons.VISIBILITY,
+            bgcolor=COLOR_VER_DETALLE,
+            color="white",
+            height=50,
+            on_click=lambda e, codigo=codigo_orden: (
+                cambiar_vista(
+                    "detalle_orden",
+                    codigo,
+                )
+            ),
+        )
+
+        boton_editar = ft.ElevatedButton(
+            "Editar",
+            icon=ft.Icons.EDIT,
+            bgcolor=COLOR_EDITAR,
+            color="white",
+            height=50,
+            on_click=lambda e, codigo=codigo_orden: (
+                cambiar_vista(
+                    "editar_orden",
+                    codigo,
+                )
+            ),
+        )
+
+        boton_pdf = ft.ElevatedButton(
+            texto_boton_pdf,
+            icon=icono_boton_pdf,
+            bgcolor=COLOR_PRIMARIO,
+            color="white",
+            height=50,
+            disabled=not bool(ruta_pdf),
+            on_click=lambda e, ruta=ruta_pdf: (
+                ejecutar_pdf(
+                    ruta
+                )
+            ),
+        )
+
+        boton_eliminar = ft.ElevatedButton(
+            "Eliminar",
+            icon=ft.Icons.DELETE,
+            bgcolor=COLOR_ELIMINAR,
+            color="white",
+            height=50,
+            on_click=lambda e, codigo=codigo_orden: (
+                confirmar_eliminacion(
+                    codigo
+                )
+            ),
+        )
+
+        botones = ft.ResponsiveRow(
+            spacing=10,
+            run_spacing=10,
+            controls=[
+                ft.Container(
+                    col={
+                        "xs": 6,
+                        "sm": 3,
+                    },
+                    content=boton_detalle,
+                ),
+                ft.Container(
+                    col={
+                        "xs": 6,
+                        "sm": 3,
+                    },
+                    content=boton_editar,
+                ),
+                ft.Container(
+                    col={
+                        "xs": 6,
+                        "sm": 3,
+                    },
+                    content=boton_pdf,
+                ),
+                ft.Container(
+                    col={
+                        "xs": 6,
+                        "sm": 3,
+                    },
+                    content=boton_eliminar,
+                ),
+            ],
         )
 
         return ft.Container(
@@ -225,60 +443,7 @@ def historial_view(page: ft.Page, cambiar_vista):
                         color=COLOR_TEXTO,
                     ),
 
-                    ft.Row(
-                        wrap=True,
-                        spacing=10,
-                        run_spacing=10,
-                        controls=[
-                            ft.ElevatedButton(
-                                "Ver detalle",
-                                icon=ft.Icons.VISIBILITY,
-                                bgcolor=COLOR_VER_DETALLE,
-                                color="white",
-                                on_click=lambda e, codigo=codigo_orden: (
-                                    cambiar_vista(
-                                        "detalle_orden",
-                                        codigo,
-                                    )
-                                ),
-                            ),
-
-                            ft.ElevatedButton(
-                                "Editar",
-                                icon=ft.Icons.EDIT,
-                                bgcolor=COLOR_EDITAR,
-                                color="white",
-                                on_click=lambda e, codigo=codigo_orden: (
-                                    cambiar_vista(
-                                        "editar_orden",
-                                        codigo,
-                                    )
-                                ),
-                            ),
-
-                            ft.ElevatedButton(
-                                "Abrir PDF",
-                                icon=ft.Icons.PICTURE_AS_PDF,
-                                bgcolor=COLOR_PRIMARIO,
-                                color="white",
-                                on_click=lambda e, ruta=ruta_pdf: (
-                                    abrir_pdf(ruta)
-                                ),
-                            ),
-
-                            ft.ElevatedButton(
-                                "Eliminar",
-                                icon=ft.Icons.DELETE,
-                                bgcolor=COLOR_ELIMINAR,
-                                color="white",
-                                on_click=lambda e, codigo=codigo_orden: (
-                                    confirmar_eliminacion(
-                                        codigo
-                                    )
-                                ),
-                            ),
-                        ],
-                    ),
+                    botones,
                 ],
             ),
         )
@@ -287,7 +452,9 @@ def historial_view(page: ft.Page, cambiar_vista):
     # MOSTRAR Y CARGAR ÓRDENES
     # =====================================================
 
-    def mostrar(ordenes_filtradas):
+    def mostrar(
+        ordenes_filtradas,
+    ):
         lista.controls.clear()
 
         if not ordenes_filtradas:
@@ -306,7 +473,9 @@ def historial_view(page: ft.Page, cambiar_vista):
         else:
             for orden in ordenes_filtradas:
                 lista.controls.append(
-                    crear_tarjeta(orden)
+                    crear_tarjeta(
+                        orden
+                    )
                 )
 
         page.update()
@@ -315,7 +484,10 @@ def historial_view(page: ft.Page, cambiar_vista):
         nonlocal ordenes
 
         ordenes = listar_ordenes()
-        mostrar(ordenes)
+
+        mostrar(
+            ordenes
+        )
 
     # =====================================================
     # BUSCADOR
@@ -327,22 +499,36 @@ def historial_view(page: ft.Page, cambiar_vista):
         ).strip().lower()
 
         if not texto:
-            mostrar(ordenes)
+            mostrar(
+                ordenes
+            )
             return
 
         resultados = []
 
         for orden in ordenes:
             cliente = str(
-                orden.get("cliente", "")
+                orden.get(
+                    "cliente",
+                    orden.get(
+                        "nombre_cliente",
+                        "",
+                    ),
+                )
             ).lower()
 
             patente = str(
-                orden.get("patente", "")
+                orden.get(
+                    "patente",
+                    "",
+                )
             ).lower()
 
             codigo = str(
-                orden.get("codigo_orden", "")
+                orden.get(
+                    "codigo_orden",
+                    "",
+                )
             ).lower()
 
             if (
@@ -350,9 +536,13 @@ def historial_view(page: ft.Page, cambiar_vista):
                 or texto in patente
                 or texto in codigo
             ):
-                resultados.append(orden)
+                resultados.append(
+                    orden
+                )
 
-        mostrar(resultados)
+        mostrar(
+            resultados
+        )
 
     buscador.on_change = buscar
 
@@ -363,14 +553,19 @@ def historial_view(page: ft.Page, cambiar_vista):
     # =====================================================
 
     encabezado = ft.Row(
-        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        alignment=(
+            ft.MainAxisAlignment.SPACE_BETWEEN
+        ),
+        vertical_alignment=(
+            ft.CrossAxisAlignment.CENTER
+        ),
         controls=[
             ft.Text(
                 "Historial de Órdenes",
                 size=26,
                 weight=ft.FontWeight.BOLD,
                 color="white",
+                expand=True,
             ),
 
             ft.IconButton(
