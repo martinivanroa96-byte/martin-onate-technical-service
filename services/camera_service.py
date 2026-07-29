@@ -11,13 +11,13 @@ class CameraService:
         self.controles_agregados = False
         self.camara_seleccionada = None
 
-        # Los controles nativos de cámara y permisos se crean
-        # únicamente cuando la aplicación se ejecuta en Android.
         if page.platform == ft.PagePlatform.ANDROID:
             self.permission_handler = fph.PermissionHandler()
 
             self.camera = fc.Camera(
-                preview_enabled=True,
+                preview_enabled=False,
+                width=1,
+                height=1,
             )
         else:
             self.permission_handler = None
@@ -26,25 +26,18 @@ class CameraService:
         self.agregar_controles_a_pagina()
 
     def agregar_controles_a_pagina(self):
-        """
-        Agrega Camera y PermissionHandler al árbol de controles.
-
-        Los controles deben estar agregados a la página antes de utilizar
-        sus métodos nativos en Android.
-        """
         if self.controles_agregados:
             return
 
-        # En Windows no se agrega ningún control nativo.
         if self.page.platform != ft.PagePlatform.ANDROID:
             self.controles_agregados = True
             return
 
         if (
             self.permission_handler is not None
-            and self.permission_handler not in self.page.overlay
+            and self.permission_handler not in self.page.services
         ):
-            self.page.overlay.append(
+            self.page.services.append(
                 self.permission_handler
             )
 
@@ -74,7 +67,6 @@ class CameraService:
             )
 
         try:
-            # Garantiza que los controles estén montados.
             self.agregar_controles_a_pagina()
 
             permiso = await self.permission_handler.request(
@@ -95,7 +87,6 @@ class CameraService:
                     "No se encontró ninguna cámara disponible.",
                 )
 
-            # Selecciona preferentemente la cámara trasera.
             camara_trasera = next(
                 (
                     camara
@@ -116,8 +107,7 @@ class CameraService:
             )
 
             self.camara_seleccionada = (
-                camara_trasera
-                or camaras[0]
+                camara_trasera or camaras[0]
             )
 
             await self.camera.initialize(
@@ -130,7 +120,6 @@ class CameraService:
             try:
                 await self.camera.lock_capture_orientation()
             except Exception:
-                # Algunos dispositivos no permiten bloquear la orientación.
                 pass
 
             self.inicializada = True
@@ -169,9 +158,6 @@ class CameraService:
         return foto_bytes
 
     async def cerrar(self):
-        """
-        Libera los recursos utilizados por la cámara.
-        """
         if self.camera is None:
             return
 
