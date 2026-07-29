@@ -1,50 +1,205 @@
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
-import shutil
+
+from PIL import Image, ImageOps
 
 
 CARPETA_FOTOS = Path("fotos")
 TIPOS_VALIDOS = ("antes", "durante", "despues")
 
 
-def normalizar_codigo_orden(codigo_orden: str) -> str:
-    codigo = str(codigo_orden or "").strip()
+def normalizar_codigo_orden(
+    codigo_orden: str,
+) -> str:
+    codigo = str(
+        codigo_orden or ""
+    ).strip()
 
     if not codigo:
-        codigo = datetime.now().strftime("OT-%Y%m%d-%H%M%S")
+        codigo = datetime.now().strftime(
+            "OT-%Y%m%d-%H%M%S"
+        )
 
     caracteres_validos = []
 
     for caracter in codigo:
-        if caracter.isalnum() or caracter in ("-", "_"):
-            caracteres_validos.append(caracter)
+        if (
+            caracter.isalnum()
+            or caracter in ("-", "_")
+        ):
+            caracteres_validos.append(
+                caracter
+            )
 
-    codigo_limpio = "".join(caracteres_validos)
+    codigo_limpio = "".join(
+        caracteres_validos
+    )
 
-    return codigo_limpio or datetime.now().strftime("OT-%Y%m%d-%H%M%S")
+    return (
+        codigo_limpio
+        or datetime.now().strftime(
+            "OT-%Y%m%d-%H%M%S"
+        )
+    )
 
 
-def crear_estructura_orden(codigo_orden: str) -> dict:
-    codigo = normalizar_codigo_orden(codigo_orden)
-    carpeta_orden = CARPETA_FOTOS / codigo
+def crear_estructura_orden(
+    codigo_orden: str,
+) -> dict:
+    codigo = normalizar_codigo_orden(
+        codigo_orden
+    )
+
+    carpeta_orden = (
+        CARPETA_FOTOS
+        / codigo
+    )
 
     rutas = {
         "orden": carpeta_orden,
     }
 
     for tipo in TIPOS_VALIDOS:
-        carpeta_tipo = carpeta_orden / tipo
-        carpeta_tipo.mkdir(parents=True, exist_ok=True)
+        carpeta_tipo = (
+            carpeta_orden
+            / tipo
+        )
+
+        carpeta_tipo.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
         rutas[tipo] = carpeta_tipo
 
     return rutas
 
 
-def obtener_siguiente_nombre(carpeta: Path, extension: str = ".jpg") -> str:
-    archivos = list(carpeta.glob(f"*{extension}"))
-    siguiente_numero = len(archivos) + 1
+def obtener_siguiente_nombre(
+    carpeta: Path,
+    extension: str = ".jpg",
+) -> str:
+    archivos = list(
+        carpeta.glob(
+            f"*{extension}"
+        )
+    )
 
-    return f"{siguiente_numero:03d}{extension}"
+    siguiente_numero = (
+        len(archivos) + 1
+    )
+
+    return (
+        f"{siguiente_numero:03d}"
+        f"{extension}"
+    )
+
+
+def normalizar_extension(
+    extension: str,
+) -> str:
+    extension = str(
+        extension or ".jpg"
+    ).strip().lower()
+
+    if not extension.startswith("."):
+        extension = (
+            f".{extension}"
+        )
+
+    extensiones_validas = (
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp",
+    )
+
+    if extension not in extensiones_validas:
+        return ".jpg"
+
+    return extension
+
+
+def corregir_orientacion_imagen(
+    imagen: Image.Image,
+) -> Image.Image:
+    """
+    Aplica la orientación EXIF real y devuelve
+    una copia lista para guardar.
+    """
+    imagen_corregida = (
+        ImageOps.exif_transpose(
+            imagen
+        )
+    )
+
+    return imagen_corregida.copy()
+
+
+def guardar_imagen(
+    imagen: Image.Image,
+    ruta_destino: Path,
+):
+    extension = (
+        ruta_destino.suffix.lower()
+    )
+
+    imagen = corregir_orientacion_imagen(
+        imagen
+    )
+
+    if extension in (
+        ".jpg",
+        ".jpeg",
+    ):
+        if imagen.mode not in (
+            "RGB",
+            "L",
+        ):
+            imagen = imagen.convert(
+                "RGB"
+            )
+
+        imagen.save(
+            ruta_destino,
+            format="JPEG",
+            quality=92,
+            optimize=True,
+        )
+
+    elif extension == ".png":
+        imagen.save(
+            ruta_destino,
+            format="PNG",
+            optimize=True,
+        )
+
+    elif extension == ".webp":
+        if imagen.mode not in (
+            "RGB",
+            "RGBA",
+        ):
+            imagen = imagen.convert(
+                "RGB"
+            )
+
+        imagen.save(
+            ruta_destino,
+            format="WEBP",
+            quality=92,
+            method=6,
+        )
+
+    else:
+        imagen.convert(
+            "RGB"
+        ).save(
+            ruta_destino,
+            format="JPEG",
+            quality=92,
+            optimize=True,
+        )
 
 
 def guardar_foto_bytes(
@@ -53,31 +208,67 @@ def guardar_foto_bytes(
     contenido: bytes,
     extension: str = ".jpg",
 ) -> str:
-    tipo = str(tipo or "").strip().lower()
+    tipo = str(
+        tipo or ""
+    ).strip().lower()
 
     if tipo not in TIPOS_VALIDOS:
         raise ValueError(
-            "Tipo de fotografía inválido. Usa: antes, durante o despues."
+            (
+                "Tipo de fotografía inválido. "
+                "Usa: antes, durante o despues."
+            )
         )
 
     if not contenido:
-        raise ValueError("La fotografía no contiene datos.")
+        raise ValueError(
+            "La fotografía no contiene datos."
+        )
 
-    if not extension.startswith("."):
-        extension = f".{extension}"
-
-    rutas = crear_estructura_orden(codigo_orden)
-    carpeta_destino = rutas[tipo]
-
-    nombre_archivo = obtener_siguiente_nombre(
-        carpeta_destino,
-        extension,
+    extension = normalizar_extension(
+        extension
     )
 
-    ruta_destino = carpeta_destino / nombre_archivo
-    ruta_destino.write_bytes(contenido)
+    rutas = crear_estructura_orden(
+        codigo_orden
+    )
 
-    return str(ruta_destino)
+    carpeta_destino = rutas[
+        tipo
+    ]
+
+    nombre_archivo = (
+        obtener_siguiente_nombre(
+            carpeta_destino,
+            extension,
+        )
+    )
+
+    ruta_destino = (
+        carpeta_destino
+        / nombre_archivo
+    )
+
+    try:
+        with Image.open(
+            BytesIO(contenido)
+        ) as imagen:
+            guardar_imagen(
+                imagen,
+                ruta_destino,
+            )
+
+    except Exception as error:
+        raise ValueError(
+            (
+                "No se pudo procesar la "
+                f"fotografía: {error}"
+            )
+        ) from error
+
+    return str(
+        ruta_destino
+    )
 
 
 def copiar_foto_desde_archivo(
@@ -85,50 +276,100 @@ def copiar_foto_desde_archivo(
     tipo: str,
     ruta_origen: str,
 ) -> str:
-    tipo = str(tipo or "").strip().lower()
-    origen = Path(ruta_origen)
+    tipo = str(
+        tipo or ""
+    ).strip().lower()
+
+    origen = Path(
+        ruta_origen
+    )
 
     if tipo not in TIPOS_VALIDOS:
         raise ValueError(
-            "Tipo de fotografía inválido. Usa: antes, durante o despues."
+            (
+                "Tipo de fotografía inválido. "
+                "Usa: antes, durante o despues."
+            )
         )
 
-    if not origen.exists() or not origen.is_file():
+    if (
+        not origen.exists()
+        or not origen.is_file()
+    ):
         raise FileNotFoundError(
-            f"No se encontró la imagen seleccionada: {ruta_origen}"
+            (
+                "No se encontró la imagen "
+                f"seleccionada: {ruta_origen}"
+            )
         )
 
-    extension = origen.suffix.lower() or ".jpg"
-
-    rutas = crear_estructura_orden(codigo_orden)
-    carpeta_destino = rutas[tipo]
-
-    nombre_archivo = obtener_siguiente_nombre(
-        carpeta_destino,
-        extension,
+    extension = normalizar_extension(
+        origen.suffix
     )
 
-    destino = carpeta_destino / nombre_archivo
-    shutil.copy2(origen, destino)
+    rutas = crear_estructura_orden(
+        codigo_orden
+    )
 
-    return str(destino)
+    carpeta_destino = rutas[
+        tipo
+    ]
+
+    nombre_archivo = (
+        obtener_siguiente_nombre(
+            carpeta_destino,
+            extension,
+        )
+    )
+
+    destino = (
+        carpeta_destino
+        / nombre_archivo
+    )
+
+    try:
+        with Image.open(
+            origen
+        ) as imagen:
+            guardar_imagen(
+                imagen,
+                destino,
+            )
+
+    except Exception as error:
+        raise ValueError(
+            (
+                "No se pudo procesar la "
+                f"imagen seleccionada: {error}"
+            )
+        ) from error
+
+    return str(
+        destino
+    )
 
 
-def listar_fotos(codigo_orden: str) -> dict:
-    rutas = crear_estructura_orden(codigo_orden)
+def listar_fotos(
+    codigo_orden: str,
+) -> dict:
+    rutas = crear_estructura_orden(
+        codigo_orden
+    )
 
     resultado = {}
 
     for tipo in TIPOS_VALIDOS:
         archivos = sorted(
             archivo
-            for archivo in rutas[tipo].iterdir()
+            for archivo
+            in rutas[tipo].iterdir()
             if archivo.is_file()
         )
 
         resultado[tipo] = [
             str(archivo)
-            for archivo in archivos
+            for archivo
+            in archivos
         ]
 
     return resultado
