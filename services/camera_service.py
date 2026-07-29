@@ -7,59 +7,71 @@ class CameraService:
 
     def __init__(self, page: ft.Page):
         self.page = page
+
         self.inicializada = False
-        self.controles_agregados = False
+        self.inicializando = False
         self.camara_seleccionada = None
 
-        if page.platform == ft.PagePlatform.ANDROID:
+        self.permission_handler = None
+        self.camera = None
+
+        if self.es_android():
             self.permission_handler = fph.PermissionHandler()
 
             self.camera = fc.Camera(
-                preview_enabled=False,
-                width=1,
-                height=1,
+                preview_enabled=True,
+                width=360,
+                height=480,
             )
-        else:
-            self.permission_handler = None
-            self.camera = None
 
-        self.agregar_controles_a_pagina()
+            self.agregar_servicio_permisos()
 
-    def agregar_controles_a_pagina(self):
-        if self.controles_agregados:
+    def es_android(self) -> bool:
+        return (
+            self.page.platform
+            == ft.PagePlatform.ANDROID
+        )
+
+    def agregar_servicio_permisos(self):
+        """
+        PermissionHandler es un servicio de Flet, por lo que
+        debe agregarse a page.services y no a page.overlay.
+        """
+        if not self.es_android():
             return
 
-        if self.page.platform != ft.PagePlatform.ANDROID:
-            self.controles_agregados = True
+        if self.permission_handler is None:
             return
 
         if (
-            self.permission_handler is not None
-            and self.permission_handler not in self.page.services
+            self.permission_handler
+            not in self.page.services
         ):
             self.page.services.append(
                 self.permission_handler
             )
 
-        if (
-            self.camera is not None
-            and self.camera not in self.page.overlay
-        ):
-            self.page.overlay.append(
-                self.camera
-            )
+            self.page.update()
 
-        self.controles_agregados = True
-        self.page.update()
+    def obtener_preview(self):
+        """
+        Devuelve el control Camera para colocarlo dentro
+        de la ventana de vista previa.
 
-    def disponible_en_dispositivo(self):
+        Importante:
+        nuevo_servicio.py debe mostrar este control en la
+        página antes de llamar a inicializar().
+        """
+        return self.camera
+
+    def disponible_en_dispositivo(self) -> bool:
         return (
-            self.page.platform == ft.PagePlatform.ANDROID
+            self.es_android()
             and self.camera is not None
             and self.permission_handler is not None
         )
 
-    async def inicializar(self):
+    async def solicitar_permiso(self):
         if not self.disponible_en_dispositivo():
             return (
                 False,
@@ -67,19 +79,86 @@ class CameraService:
             )
 
         try:
-            self.agregar_controles_a_pagina()
+            self.agregar_servicio_permisos()
 
-            permiso = await self.permission_handler.request(
-                fph.Permission.CAMERA
+            permiso = (
+                await self.permission_handler.request(
+                    fph.Permission.CAMERA
+                )
             )
 
-            if permiso != fph.PermissionStatus.GRANTED:
+            if permiso == fph.PermissionStatus.GRANTED:
                 return (
-                    False,
-                    "No se concedió permiso para utilizar la cámara.",
+                    True,
+                    "Permiso de cámara concedido.",
                 )
 
-            camaras = await self.camera.get_available_cameras()
+            if (
+                permiso
+                == fph.PermissionStatus.PERMANENTLY_DENIED
+            ):
+                return (
+                    False,
+                    (
+                        "El permiso de cámara fue bloqueado. "
+                        "Debes habilitarlo desde la configuración "
+                        "de aplicaciones de Android."
+                    ),
+                )
+
+            return (
+                False,
+                "No se concedió permiso para utilizar la cámara.",
+            )
+
+        except Exception as error:
+            return (
+                False,
+                f"No se pudo solicitar el permiso: {error}",
+            )
+
+    async def inicializar(self):
+        """
+        Inicializa la cámara.
+
+        El control obtenido mediante obtener_preview()
+        debe estar visible y agregado a la página antes
+        de ejecutar este método.
+        """
+        if not self.disponible_en_dispositivo():
+            return (
+                False,
+                "La cámara directa solo está disponible en Android.",
+            )
+
+        if self.inicializada:
+            return (
+                True,
+                "Cámara lista.",
+            )
+
+        if self.inicializando:
+            return (
+                False,
+                "La cámara se está inicializando.",
+            )
+
+        self.inicializando = True
+
+        try:
+            permiso_correcto, detalle = (
+                await self.solicitar_permiso()
+            )
+
+            if not permiso_correcto:
+                return (
+                    False,
+                    detalle,
+                )
+
+            camaras = (
+                await self.camera.get_available_cameras()
+            )
 
             if not camaras:
                 return (
@@ -91,35 +170,33 @@ class CameraService:
                 (
                     camara
                     for camara in camaras
-                    if str(
-                        getattr(
-                            camara.lens_direction,
-                            "value",
-                            camara.lens_direction,
-                        )
-                    ).lower()
-                    in (
-                        "back",
-                        "camera_lens_direction.back",
-                    )
+                    if self.es_camara_trasera(camara)
                 ),
                 None,
             )
 
             self.camara_seleccionada = (
-                camara_trasera or camaras[0]
+                camara_trasera
+                if camara_trasera is not None
+                else camaras[0]
             )
 
             await self.camera.initialize(
                 description=self.camara_seleccionada,
-                resolution_preset=fc.ResolutionPreset.MEDIUM,
+                resolution_preset=(
+                    fc.ResolutionPreset.MEDIUM
+                ),
                 enable_audio=False,
-                image_format_group=fc.ImageFormatGroup.JPEG,
+                image_format_group=(
+                    fc.ImageFormatGroup.JPEG
+                ),
             )
 
             try:
                 await self.camera.lock_capture_orientation()
             except Exception:
+                # Algunos dispositivos no permiten bloquear
+                # la orientación. No impide tomar fotografías.
                 pass
 
             self.inicializada = True
@@ -134,8 +211,38 @@ class CameraService:
 
             return (
                 False,
-                f"No se pudo inicializar la cámara: {error}",
+                (
+                    "No se pudo inicializar la cámara: "
+                    f"{error}"
+                ),
             )
+
+        finally:
+            self.inicializando = False
+
+    def es_camara_trasera(self, camara) -> bool:
+        try:
+            direccion = getattr(
+                camara,
+                "lens_direction",
+                "",
+            )
+
+            valor = getattr(
+                direccion,
+                "value",
+                direccion,
+            )
+
+            texto = str(valor).lower()
+
+            return texto in (
+                "back",
+                "camera_lens_direction.back",
+            )
+
+        except Exception:
+            return False
 
     async def tomar_foto(self):
         if self.camera is None:
@@ -158,13 +265,20 @@ class CameraService:
         return foto_bytes
 
     async def cerrar(self):
+        """
+        Libera la cámara cuando ya no se utilizará.
+        """
         if self.camera is None:
             return
 
         try:
             if self.inicializada:
                 await self.camera.dispose()
+
         except Exception:
             pass
 
-        self.inicializada = False
+        finally:
+            self.inicializada = False
+            self.inicializando = False
+            self.camara_seleccionada = None
